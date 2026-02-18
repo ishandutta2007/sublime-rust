@@ -1,1 +1,27 @@
-# sublime-rust
+# Sublime Rust
+
+A high-performance, modern text editor inspired by Sublime Text, rewritten from the ground up in Rust using the GPUI framework.
+
+## Project Goals
+
+- **Performance:** Leveraging Rust's safety and speed.
+- **Minimalism:** Maintaining the clean, focused interface of Sublime Text.
+- **Extensibility:** Built with a modular architecture for easy customization.
+- **Modern UI:** Using GPUI (the engine behind Zed) for smooth, GPU-accelerated rendering.
+
+## Getting Started
+
+### Prerequisites
+
+- [Rust](https://rustup.rs/) (latest stable)
+- System dependencies for GPUI (see [GPUI docs](https://github.com/zed-industries/zed/tree/main/crates/gpui))
+
+### Running
+
+```bash
+cargo run
+```
+
+## Status
+
+This project is in its early stages of development.
