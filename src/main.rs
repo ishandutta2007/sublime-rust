@@ -1,117 +1,229 @@
 use gpui::*;
+use gpui::prelude::FluentBuilder;
+use gpui_component::{
+    button::{Button, ButtonVariants},
+    init, Root, Sizable,
+};
 
-struct HelloWorld;
+actions!(sublime_rust, [Quit]);
 
-impl HelloWorld {
-    fn render_menu_item(&self, label: &'static str) -> impl IntoElement {
-        div()
-            .px_3()
-            .py_1()
-            .text_size(px(12.0))
-            .text_color(rgb(0xcccccc))
-            .hover(|style| style.bg(rgb(0x3e3e3e)).text_color(rgb(0xffffff)))
-            .child(label)
+// ── Menu state ────────────────────────────────────────────────────────────────
+
+#[derive(Clone, PartialEq)]
+enum OpenMenu {
+    None,
+    File,
+}
+
+// ── File-menu dropdown items ──────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct MenuItem {
+    label: &'static str,
+    shortcut: Option<&'static str>,
+    is_separator: bool,
+    has_arrow: bool,
+}
+
+impl MenuItem {
+    fn item(label: &'static str, shortcut: Option<&'static str>) -> Self {
+        Self { label, shortcut, is_separator: false, has_arrow: false }
+    }
+    fn sep() -> Self {
+        Self { label: "", shortcut: None, is_separator: true, has_arrow: false }
+    }
+    fn submenu(label: &'static str) -> Self {
+        Self { label, shortcut: None, is_separator: false, has_arrow: true }
     }
 }
 
-impl Render for HelloWorld {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+fn file_menu_items() -> Vec<MenuItem> {
+    vec![
+        MenuItem::item("New File",           Some("Ctrl+N")),
+        MenuItem::sep(),
+        MenuItem::item("Open File...",        Some("Ctrl+O")),
+        MenuItem::item("Open Folder...",      None),
+        MenuItem::submenu("Open Recent"),
+        MenuItem::sep(),
+        MenuItem::item("Reopen Closed File",  None),
+        MenuItem::item("New View into File",  None),
+        MenuItem::sep(),
+        MenuItem::item("Save",                Some("Ctrl+S")),
+        MenuItem::item("Save As...",          None),
+        MenuItem::item("Save All",            None),
+        MenuItem::sep(),
+        MenuItem::item("Reload from Disk",    None),
+        MenuItem::sep(),
+        MenuItem::item("Close View",          Some("Ctrl+W")),
+        MenuItem::item("Close File",          None),
+        MenuItem::sep(),
+        if cfg!(target_os = "macos") {
+            MenuItem::item("Quit", Some("Cmd+Q"))
+        } else {
+            MenuItem::item("Exit", Some("Alt+F4"))
+        },
+    ]
+}
+
+// ── App view ──────────────────────────────────────────────────────────────────
+
+struct AppView {
+    open_menu: OpenMenu,
+}
+
+impl AppView {
+    fn new(_cx: &mut Context<Self>) -> Self {
+        Self { open_menu: OpenMenu::None }
+    }
+
+    /// Render the dropdown panel for the File menu
+    fn render_file_dropdown(&self) -> impl IntoElement {
+        div()
+            .absolute()
+            .top(px(22.0))
+            .left(px(0.0))
+            .w(px(270.0))
+            .bg(rgb(0x2d2d2d))
+            .border_1()
+            .border_color(rgb(0x454545))
+            .shadow_lg()
+            .py(px(4.0))
+            .children(file_menu_items().into_iter().map(|item| {
+                if item.is_separator {
+                    div()
+                        .h(px(1.0))
+                        .my(px(3.0))
+                        .mx(px(8.0))
+                        .bg(rgb(0x444444))
+                        .into_any_element()
+                } else {
+                    div()
+                        .flex()
+                        .justify_between()
+                        .items_center()
+                        .px(px(12.0))
+                        .py(px(3.0))
+                        .text_size(px(12.0))
+                        .text_color(rgb(0xcccccc))
+                        .hover(|s| s.bg(rgb(0x094771)).text_color(rgb(0xffffff)))
+                        .cursor_pointer()
+                        .child(item.label)
+                        .when(item.has_arrow, |el| {
+                            el.child(
+                                div()
+                                    .text_size(px(10.0))
+                                    .text_color(rgb(0x888888))
+                                    .child("▶"),
+                            )
+                        })
+                        .when_some(item.shortcut, |el, sc| {
+                            el.child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(rgb(0x888888))
+                                    .child(sc),
+                            )
+                        })
+                        .into_any_element()
+                }
+            }))
+    }
+}
+
+impl Render for AppView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let file_open = self.open_menu == OpenMenu::File;
+
         div()
             .flex()
             .flex_col()
-            .bg(rgb(0x232323))
             .size_full()
+            .bg(rgb(0x232323))
+            // ── Menu bar ──────────────────────────────────────────────────
             .child(
-                // Menu Bar
                 div()
                     .flex()
+                    .flex_row()
                     .bg(rgb(0x1e1e1e))
                     .w_full()
-                    .child(self.render_menu_item("File"))
-                    .child(self.render_menu_item("Edit"))
-                    .child(self.render_menu_item("Selection"))
-                    .child(self.render_menu_item("Find"))
-                    .child(self.render_menu_item("View"))
-                    .child(self.render_menu_item("Goto"))
-                    .child(self.render_menu_item("Tools"))
-                    .child(self.render_menu_item("Project"))
-                    .child(self.render_menu_item("Preferences"))
-                    .child(self.render_menu_item("Help")),
+                    // File button — uses gpui-component Button which is confirmed working
+                    .child(
+                        div()
+                            .relative()
+                            .child(
+                                Button::new("btn-file")
+                                    .ghost()
+                                    .xsmall()
+                                    .label("File")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_menu = if this.open_menu == OpenMenu::File {
+                                            OpenMenu::None
+                                        } else {
+                                            OpenMenu::File
+                                        };
+                                        cx.notify();
+                                    })),
+                            )
+                            .when(file_open, |el| el.child(self.render_file_dropdown())),
+                    )
+                    // Other menu bar labels (static for now)
+                    .child(plain_menu_label("Edit"))
+                    .child(plain_menu_label("Selection"))
+                    .child(plain_menu_label("Find"))
+                    .child(plain_menu_label("View"))
+                    .child(plain_menu_label("Goto"))
+                    .child(plain_menu_label("Tools"))
+                    .child(plain_menu_label("Project"))
+                    .child(plain_menu_label("Preferences"))
+                    .child(plain_menu_label("Help")),
             )
+            // ── Main content ──────────────────────────────────────────────
             .child(
-                // Main Content Area
                 div()
                     .flex()
                     .flex_1()
                     .justify_center()
                     .items_center()
-                    .text_color(rgb(0x666666))
                     .text_xl()
+                    .text_color(rgb(0x555555))
                     .child("Hello, Sublime-rust!"),
             )
     }
 }
 
-actions!(sublime_rust, [
-    Quit, 
-    NewFile, 
-    Open, 
-    Save, 
-    Undo, 
-    Redo, 
-    Cut, 
-    Copy, 
-    Paste, 
-    SelectAll,
-    Find,
-    Replace,
-    GotoAnything,
-    CommandPalette
-]);
+fn plain_menu_label(label: &'static str) -> impl IntoElement {
+    div()
+        .px_3()
+        .py_1()
+        .text_size(px(12.0))
+        .text_color(rgb(0xcccccc))
+        .hover(|s| s.bg(rgb(0x3e3e3e)))
+        .cursor_pointer()
+        .child(label)
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 fn main() {
-    Application::new().run(|cx| {
-        cx.on_action(|_action: &Quit, cx| cx.quit());
+    Application::new().run(|cx: &mut App| {
+        // Required by gpui-component
+        init(cx);
 
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds {
-                origin: point(px(100.0), px(100.0)),
-                size: size(px(1024.0), px(768.0)),
-            })),
-            ..Default::default()
-        };
+        cx.on_action(|_: &Quit, cx| cx.quit());
 
-        // Still set the system menus for OS-level integration (e.g. shortcuts)
-        cx.set_menus(vec![
-            Menu {
-                name: "File".into(),
-                items: vec![
-                    MenuItem::action("New File", NewFile),
-                    MenuItem::action("Open...", Open),
-                    MenuItem::separator(),
-                    MenuItem::action("Save", Save),
-                    MenuItem::separator(),
-                    MenuItem::action("Quit", Quit),
-                ],
+        let bounds = Bounds::centered(None, size(px(1024.0), px(768.0)), cx);
+
+        cx.open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(bounds)),
+                ..Default::default()
             },
-            Menu {
-                name: "Edit".into(),
-                items: vec![
-                    MenuItem::action("Undo", Undo),
-                    MenuItem::action("Redo", Redo),
-                    MenuItem::separator(),
-                    MenuItem::action("Cut", Cut),
-                    MenuItem::action("Copy", Copy),
-                    MenuItem::action("Paste", Paste),
-                    MenuItem::separator(),
-                    MenuItem::action("Select All", SelectAll),
-                ],
+            |window, cx| {
+                let view = cx.new(|cx| AppView::new(cx));
+                // Root is required by gpui-component for event routing to work
+                cx.new(|cx| Root::new(view, window, cx))
             },
-        ]);
-
-        cx.open_window(options, |_, cx| {
-            cx.new(|_| HelloWorld)
-        })
+        )
         .expect("failed to open window");
     });
 }
