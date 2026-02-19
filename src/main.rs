@@ -193,6 +193,7 @@ struct AppView {
     char_widths: HashMap<char, f32>, // New field
     sidebar_width: f32,
     is_dragging_sidebar: bool,
+    opened_file_content: Option<String>,
 }
 
 // Constants for menu button sizing
@@ -213,6 +214,7 @@ impl AppView {
             char_widths, // Initialize with parsed data
             sidebar_width: 200.0,
             is_dragging_sidebar: false,
+            opened_file_content: None,
         }
     }
 
@@ -290,8 +292,9 @@ impl AppView {
                                     cx.listener({
                                         let entry_path_clone = entry_path.clone();
                                         move |_this, _, _, cx| {
-                                            // TODO: Open file
-                                            eprintln!("Clicked file: {:?}", entry_path_clone);
+                                            if let Ok(content) = fs::read_to_string(&entry_path_clone) {
+                                                _this.opened_file_content = Some(content);
+                                            }
                                             cx.notify();
                                         }
                                     }),
@@ -450,12 +453,12 @@ impl Render for AppView {
                     .child(
                         div()
                             .flex_1()
-                            .flex()
-                            .justify_center()
-                            .items_center()
-                            .text_xl()
-                            .text_color(rgb(0x555555))
-                            .child("Hello, Sublime-rust!"),
+                            .bg(rgb(0x232323))
+                            .p(px(16.0))
+                            .text_color(rgb(0xcccccc))
+                            .font_family("Courier New") // Use monospaced font
+                            .overflow_hidden()
+                            .child(self.opened_file_content.clone().unwrap_or_else(|| "Hello, Sublime-rust!".to_string())),
                     ),
             )
             // ── Dropdown overlay — rendered LAST so it paints on top ──────
