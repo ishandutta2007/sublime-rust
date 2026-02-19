@@ -200,9 +200,9 @@ const MENU_BUTTON_CORRECTION_PX: f32 = 1.0; // Adjustment for visual alignment
 impl AppView {
     fn new(_cx: &mut Context<Self>) -> Self {
         let charlen_json_content =
-            fs::read_to_string("charlen_12px.json").expect("Failed to read charlen_12px.json");
+            fs::read_to_string("charlen_arial_12px.json").expect("Failed to read charlen_arial_12px.json");
         let char_widths: HashMap<char, f32> =
-            serde_json::from_str(&charlen_json_content).expect("Failed to parse charlen_12px.json");
+            serde_json::from_str(&charlen_json_content).expect("Failed to parse charlen_arial_12px.json");
 
         Self {
             open_menu: OpenMenu::None,
