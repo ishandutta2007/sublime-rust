@@ -1,9 +1,6 @@
 use gpui::*;
 use gpui::prelude::FluentBuilder;
-use gpui_component::{
-    button::{Button, ButtonVariants},
-    init, Root, Sizable,
-};
+use gpui_component::{init, Root};
 
 actions!(sublime_rust, [Quit]);
 
@@ -108,7 +105,7 @@ impl AppView {
                         .hover(|s| s.bg(rgb(0x094771)).text_color(rgb(0xffffff)))
                         .cursor_pointer()
                         .child(item.label)
-                        .when(item.has_arrow, |el| {
+                        .when(item.has_arrow, |el: Div| {
                             el.child(
                                 div()
                                     .text_size(px(10.0))
@@ -116,7 +113,7 @@ impl AppView {
                                     .child("▶"),
                             )
                         })
-                        .when_some(item.shortcut, |el, sc| {
+                        .when_some(item.shortcut, |el: Div, sc| {
                             el.child(
                                 div()
                                     .text_size(px(11.0))
@@ -151,21 +148,24 @@ impl Render for AppView {
                         div()
                             .relative()
                             .child(
-                                Button::new("btn-file")
-                                    .ghost()
-                                    .xsmall()
+                                div()
+                                    .px_3()
+                                    .py_1()
+                                    .text_size(px(12.0))
                                     .text_color(rgb(0xcccccc))
-                                    .label("File")
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                    .hover(|s| s.bg(rgb(0x3e3e3e)).text_color(rgb(0xcccccc)))
+                                    .cursor_pointer()
+                                    .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                                         this.open_menu = if this.open_menu == OpenMenu::File {
                                             OpenMenu::None
                                         } else {
                                             OpenMenu::File
                                         };
                                         cx.notify();
-                                    })),
+                                    }))
+                                    .child("File"),
                             )
-                            .when(file_open, |el| el.child(self.render_file_dropdown())),
+                            .when(file_open, |el: Div| el.child(self.render_file_dropdown())),
                     )
                     // Other menu bar labels (static for now)
                     .child(plain_menu_label("Edit"))
