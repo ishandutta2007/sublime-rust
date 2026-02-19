@@ -1,9 +1,12 @@
 use gpui::*;
 use gpui::prelude::FluentBuilder;
 use gpui_component::{init, Root};
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::path::PathBuf;
 use std::env;
+use std::fs; // New
+use serde::Deserialize;
+use serde_json;
 
 actions!(sublime_rust, [Quit]);
 
@@ -173,14 +176,23 @@ struct AppView {
     open_menu: OpenMenu,
     current_dir: PathBuf,
     expanded_projects: HashSet<PathBuf>,
+    char_widths: HashMap<char, f32>, // New field
+    active_menu_button_bounds: Option<Bounds<f32>>,
 }
 
 impl AppView {
     fn new(_cx: &mut Context<Self>) -> Self {
+        let charlen_json_content = fs::read_to_string("charlen_12px.json")
+            .expect("Failed to read charlen_12px.json");
+        let char_widths: HashMap<char, f32> = serde_json::from_str(&charlen_json_content)
+            .expect("Failed to parse charlen_12px.json");
+
         Self {
             open_menu: OpenMenu::None,
             current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             expanded_projects: HashSet::new(),
+            active_menu_button_bounds: None,
+            char_widths, // Initialize with parsed data
         }
     }
 
@@ -371,7 +383,9 @@ impl Render for AppView {
         ];
 
         // Approximate pixel width of each menu label button (px_3 = 12px padding + ~7px/char)
-        let btn_width = |label: &str| label.len() as f32 * 7.0 + 24.0;
+        let btn_width = |label: &str| {
+            label.chars().map(|c| self.char_widths.get(&c).unwrap_or(&7.0)).sum::<f32>() + 24.0 - 1.0
+        };
 
         let mut dropdown_left = 0.0f32;
         for (label, variant) in menu_bar_labels.iter() {
