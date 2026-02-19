@@ -271,6 +271,7 @@ impl Render for AppView {
             .flex()
             .flex_col()
             .size_full()
+            .relative() // Make the root div relative for absolute children
             .bg(rgb(0x232323))
             // ── Menu bar ──────────────────────────────────────────────────
             .child(
@@ -290,17 +291,36 @@ impl Render for AppView {
                     .child(self.render_menu_button("Preferences", OpenMenu::Preferences, preferences_menu_items(), cx))
                     .child(self.render_menu_button("Help", OpenMenu::Help, help_menu_items(), cx)),
             )
-            // ── Main content ──────────────────────────────────────────────
+            // Everything below the menu bar
             .child(
-                div()
-                    .flex()
-                    .flex_1()
-                    .justify_center()
-                    .items_center()
-                    .text_xl()
-                    .text_color(rgb(0x555555))
-                    .child("Hello, Sublime-rust!"),
+                div() // Container for main content and overlay
+                    .flex_1() // Takes up the remaining vertical space
+                    .relative() // Important for absolute positioning of children
+                    // Main content
+                    .child(
+                        div()
+                            .size_full() // Takes full size of this relative parent
+                            .flex()
+                            .justify_center()
+                            .items_center()
+                            .text_xl()
+                            .text_color(rgb(0x555555))
+                            .child("Hello, Sublime-rust!"),
+                    )
             )
+            // Overlay for click-outside-to-close
+            .when(self.open_menu != OpenMenu::None, |el: Div| {
+                    el.child(
+                        div()
+                            .size_full() // Cover the full window area
+                            .absolute()
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                    this.open_menu = OpenMenu::None;
+                                    cx.notify();
+                                })
+                            )
+                    )
+            })
     }
 }
 
