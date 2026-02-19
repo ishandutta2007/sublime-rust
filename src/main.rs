@@ -193,7 +193,9 @@ struct AppView {
     char_widths: HashMap<char, f32>, // New field
     sidebar_width: f32,
     is_dragging_sidebar: bool,
-    opened_file_content: Option<String>,
+    open_tabs: Vec<PathBuf>,
+    active_tab_index: Option<usize>,
+    tab_contents: HashMap<PathBuf, String>,
 }
 
 // Constants for menu button sizing
@@ -214,7 +216,9 @@ impl AppView {
             char_widths, // Initialize with parsed data
             sidebar_width: 200.0,
             is_dragging_sidebar: false,
-            opened_file_content: None,
+            open_tabs: Vec::new(),
+            active_tab_index: None,
+            tab_contents: HashMap::new(),
         }
     }
 
@@ -292,8 +296,14 @@ impl AppView {
                                     cx.listener({
                                         let entry_path_clone = entry_path.clone();
                                         move |_this, _, _, cx| {
-                                            if let Ok(content) = fs::read_to_string(&entry_path_clone) {
-                                                _this.opened_file_content = Some(content);
+                                            if let Some(pos) = _this.open_tabs.iter().position(|p| p == &entry_path_clone) {
+                                                _this.active_tab_index = Some(pos);
+                                            } else {
+                                                if let Ok(content) = fs::read_to_string(&entry_path_clone) {
+                                                    _this.tab_contents.insert(entry_path_clone.clone(), content);
+                                                    _this.open_tabs.push(entry_path_clone.clone());
+                                                    _this.active_tab_index = Some(_this.open_tabs.len() - 1);
+                                                }
                                             }
                                             cx.notify();
                                         }
@@ -453,12 +463,78 @@ impl Render for AppView {
                     .child(
                         div()
                             .flex_1()
+                            .flex()
+                            .flex_col()
                             .bg(rgb(0x232323))
-                            .p(px(16.0))
-                            .text_color(rgb(0xcccccc))
-                            .font_family("Courier New") // Use monospaced font
-                            .overflow_hidden()
-                            .child(self.opened_file_content.clone().unwrap_or_else(|| "Hello, Sublime-rust!".to_string())),
+                            // ── Tab Bar ──────────────────────────────────────────
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_row()
+                                    .bg(rgb(0x1e1e1e))
+                                    .h(px(30.0))
+                                    .overflow_x_hidden()
+                                    .children(self.open_tabs.iter().enumerate().map(|(idx, path)| {
+                                        let is_active = Some(idx) == self.active_tab_index;
+                                        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
+                                        let path_clone = path.clone();
+                                        
+                                        div()
+                                            .flex()
+                                            .items_center()
+                                            .px(px(10.0))
+                                            .h_full()
+                                            .bg(if is_active { rgb(0x232323) } else { rgb(0x181818) })
+                                            .border_r_1()
+                                            .border_color(rgb(0x333333))
+                                            .cursor_pointer()
+                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                this.active_tab_index = Some(idx);
+                                                cx.notify();
+                                            }))
+                                            .child(
+                                                div()
+                                                    .text_size(px(12.0))
+                                                    .text_color(if is_active { rgb(0xcccccc) } else { rgb(0x888888) })
+                                                    .child(file_name)
+                                            )
+                                            .child(
+                                                div()
+                                                    .ml(px(8.0))
+                                                    .text_size(px(10.0))
+                                                    .text_color(rgb(0x666666))
+                                                    .hover(|s| s.text_color(rgb(0xcccccc)))
+                                                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                                                        this.open_tabs.remove(idx);
+                                                        this.tab_contents.remove(&path_clone);
+                                                        if let Some(active_idx) = this.active_tab_index {
+                                                            if active_idx >= this.open_tabs.len() {
+                                                                this.active_tab_index = if this.open_tabs.is_empty() { None } else { Some(this.open_tabs.len() - 1) };
+                                                            }
+                                                        }
+                                                        cx.stop_propagation();
+                                                        cx.notify();
+                                                    }))
+                                                    .child("✕")
+                                            )
+                                            .into_any_element()
+                                    })),
+                            )
+                            // ── Editor Pane ──────────────────────────────────────
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .p(px(16.0))
+                                    .text_color(rgb(0xcccccc))
+                                    .font_family("Courier New")
+                                    .overflow_hidden()
+                                    .child(
+                                        self.active_tab_index
+                                            .and_then(|idx| self.open_tabs.get(idx))
+                                            .and_then(|path| self.tab_contents.get(path).cloned())
+                                            .unwrap_or_else(|| "Hello, Sublime-rust!".to_string())
+                                    ),
+                            ),
                     ),
             )
             // ── Dropdown overlay — rendered LAST so it paints on top ──────
