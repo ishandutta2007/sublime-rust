@@ -189,7 +189,7 @@ fn help_menu_items() -> Vec<MenuItem> {
 struct AppView {
     open_menu: OpenMenu,
     current_dir: PathBuf,
-    expanded_projects: HashSet<PathBuf>,
+    expanded_dirs: HashSet<PathBuf>,
     char_widths: HashMap<char, f32>, // New field
 }
 
@@ -207,35 +207,42 @@ impl AppView {
         Self {
             open_menu: OpenMenu::None,
             current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            expanded_projects: HashSet::new(),
+            expanded_dirs: HashSet::new(),
             char_widths, // Initialize with parsed data
         }
     }
 
     /// Recursively renders the project explorer tree.
     fn render_project_explorer(&self, path: PathBuf, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_expanded = self.expanded_projects.contains(&path);
-        let project_name = path
+        let is_expanded = self.expanded_dirs.contains(&path);
+        let dir_name = path
             .file_name()
             .map_or("?", |os_str| os_str.to_str().unwrap_or("?"))
             .to_string();
 
-        let project_label = div()
+        let dir_label = div()
             .flex()
             .items_center()
-            .child(if is_expanded { "▾ " } else { "▸ " })
-            .child(project_name)
+            .child(
+                div()
+                    .w(px(12.0))
+                    .flex()
+                    .justify_center()
+                    .child(if is_expanded { "▾" } else { "▸" }),
+            )
+            .child(div().pl(px(4.0)).child(dir_name))
             .text_color(rgb(0xdddddd))
+            .hover(|s| s.bg(rgb(0x2d2d2d)))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
                     let path_clone = path.clone();
                     move |_this, _, _, cx| {
-                        if _this.expanded_projects.contains(&path_clone) {
-                            _this.expanded_projects.remove(&path_clone);
+                        if _this.expanded_dirs.contains(&path_clone) {
+                            _this.expanded_dirs.remove(&path_clone);
                         } else {
-                            _this.expanded_projects.insert(path_clone.clone());
+                            _this.expanded_dirs.insert(path_clone.clone());
                         }
                         cx.notify();
                     }
@@ -258,8 +265,7 @@ impl AppView {
 
                 for entry in sorted_entries {
                     let entry_path = entry.path();
-                    let os_string = entry.file_name();
-                    let file_name = os_string.to_str().unwrap_or("?").to_string();
+                    let file_name = entry.file_name().to_str().unwrap_or("?").to_string();
 
                     if entry_path.is_dir() {
                         children_elements.push(
@@ -270,9 +276,10 @@ impl AppView {
                         // File entry
                         children_elements.push(
                             div()
-                                .px(px(16.0)) // Indent files
+                                .pl(px(16.0)) // Align with directory text
                                 .child(file_name)
                                 .text_color(rgb(0xaaaaaa))
+                                .hover(|s| s.bg(rgb(0x2d2d2d)))
                                 .cursor_pointer()
                                 .on_mouse_down(
                                     MouseButton::Left,
@@ -295,8 +302,16 @@ impl AppView {
         div()
             .flex()
             .flex_col()
-            .child(project_label)
-            .children(children_elements)
+            .child(dir_label)
+            .when(!children_elements.is_empty(), |el| {
+                el.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .pl(px(12.0)) // Indent nested children
+                        .children(children_elements),
+                )
+            })
     }
 }
 
