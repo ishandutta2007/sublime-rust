@@ -191,6 +191,8 @@ struct AppView {
     current_dir: PathBuf,
     expanded_dirs: HashSet<PathBuf>,
     char_widths: HashMap<char, f32>, // New field
+    sidebar_width: f32,
+    is_dragging_sidebar: bool,
 }
 
 // Constants for menu button sizing
@@ -209,6 +211,8 @@ impl AppView {
             current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             expanded_dirs: HashSet::new(),
             char_widths, // Initialize with parsed data
+            sidebar_width: 200.0,
+            is_dragging_sidebar: false,
         }
     }
 
@@ -358,6 +362,27 @@ impl Render for AppView {
             .size_full()
             .relative()
             .bg(rgb(0x232323))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                if this.is_dragging_sidebar {
+                    this.sidebar_width = event.position.x.into();
+                    if this.sidebar_width < 50.0 {
+                        this.sidebar_width = 50.0;
+                    }
+                    if this.sidebar_width > 600.0 {
+                        this.sidebar_width = 600.0;
+                    }
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _window, cx| {
+                    if this.is_dragging_sidebar {
+                        this.is_dragging_sidebar = false;
+                        cx.notify();
+                    }
+                }),
+            )
             // ── Menu bar (labels only — no dropdowns nested here) ─────────
             .child(div().flex().flex_row().bg(rgb(0x1e1e1e)).w_full().children(
                 menu_bar_labels.iter().map(|(label, variant)| {
@@ -402,13 +427,25 @@ impl Render for AppView {
                     .flex_row()
                     .child(
                         div()
-                            .w(px(200.0))
+                            .w(px(self.sidebar_width))
                             .bg(rgb(0x1e1e1e))
-                            .border_r_1()
-                            .border_color(rgb(0x454545))
                             .p(px(8.0))
                             .text_color(rgb(0xcccccc))
+                            .overflow_hidden()
                             .child(self.render_project_explorer(self.current_dir.clone(), cx)),
+                    )
+                    .child(
+                        div()
+                            .w(px(2.0))
+                            .bg(rgb(0x454545))
+                            .cursor_col_resize()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _window, cx| {
+                                    this.is_dragging_sidebar = true;
+                                    cx.notify();
+                                }),
+                            ),
                     )
                     .child(
                         div()
