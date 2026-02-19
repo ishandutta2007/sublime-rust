@@ -355,52 +355,91 @@ impl AppView {
 
 impl Render for AppView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Compute horizontal offset of the open menu button so the dropdown
+        // can be absolutely positioned from the root — above the sidebar.
+        let menu_bar_labels: &[(&str, OpenMenu)] = &[
+            ("File",        OpenMenu::File),
+            ("Edit",        OpenMenu::Edit),
+            ("Selection",   OpenMenu::Selection),
+            ("Find",        OpenMenu::Find),
+            ("View",        OpenMenu::View),
+            ("Goto",        OpenMenu::Goto),
+            ("Tools",       OpenMenu::Tools),
+            ("Project",     OpenMenu::Project),
+            ("Preferences", OpenMenu::Preferences),
+            ("Help",        OpenMenu::Help),
+        ];
+
+        // Approximate pixel width of each menu label button (px_3 = 12px padding + ~7px/char)
+        let btn_width = |label: &str| label.len() as f32 * 7.0 + 24.0;
+
+        let mut dropdown_left = 0.0f32;
+        for (label, variant) in menu_bar_labels.iter() {
+            if variant == &self.open_menu {
+                break;
+            }
+            dropdown_left += btn_width(label);
+        }
+
+        let menu_bar_h = 26.0f32;
+
         div()
             .flex()
             .flex_col()
             .size_full()
-            .relative() // Make the root div relative for absolute children
+            .relative()
             .bg(rgb(0x232323))
-            // ── Menu bar ──────────────────────────────────────────────────
+            // ── Menu bar (labels only — no dropdowns nested here) ─────────
             .child(
                 div()
                     .flex()
                     .flex_row()
                     .bg(rgb(0x1e1e1e))
                     .w_full()
-                    .child(self.render_menu_button("File", OpenMenu::File, file_menu_items(), cx))
-                    .child(self.render_menu_button("Edit", OpenMenu::Edit, edit_menu_items(), cx))
-                    .child(self.render_menu_button("Selection", OpenMenu::Selection, selection_menu_items(), cx))
-                    .child(self.render_menu_button("Find", OpenMenu::Find, find_menu_items(), cx))
-                    .child(self.render_menu_button("View", OpenMenu::View, view_menu_items(), cx))
-                    .child(self.render_menu_button("Goto", OpenMenu::Goto, goto_menu_items(), cx))
-                    .child(self.render_menu_button("Tools", OpenMenu::Tools, tools_menu_items(), cx))
-                    .child(self.render_menu_button("Project", OpenMenu::Project, project_menu_items(), cx))
-                    .child(self.render_menu_button("Preferences", OpenMenu::Preferences, preferences_menu_items(), cx))
-                    .child(self.render_menu_button("Help", OpenMenu::Help, help_menu_items(), cx)),
+                    .children(menu_bar_labels.iter().map(|(label, variant)| {
+                        let is_open = variant == &self.open_menu;
+                        let variant = variant.clone();
+                        div()
+                            .px_3()
+                            .py_1()
+                            .text_size(px(12.0))
+                            .text_color(if is_open { rgb(0xffffff) } else { rgb(0xcccccc) })
+                            .bg(if is_open { rgb(0x3e3e3e) } else { rgb(0x1e1e1e) })
+                            .hover(|s| s.bg(rgb(0x3e3e3e)).text_color(rgb(0xcccccc)))
+                            .cursor_pointer()
+                            .on_mouse_down(MouseButton::Left, cx.listener(
+                                move |this, _, _, cx| {
+                                    this.open_menu = if this.open_menu == variant {
+                                        OpenMenu::None
+                                    } else {
+                                        variant.clone()
+                                    };
+                                    cx.notify();
+                                }
+                            ))
+                            .child(*label)
+                            .into_any_element()
+                    }))
             )
-            // Everything below the menu bar
+            // ── Sidebar + editor ──────────────────────────────────────────
             .child(
-                div() // This now acts as the container for the side pane and main editor area
-                    .flex_1() // Takes up the remaining vertical space
-                    .relative() // Important for absolute positioning of children
-                    .flex() // Make this a flex container for row layout
+                div()
+                    .flex_1()
+                    .flex()
                     .flex_row()
-                    // Left Side Pane (Project Explorer)
                     .child(
                         div()
-                            .w(px(200.0)) // Fixed width for the side pane
-                            .bg(rgb(0x1e1e1e)) // Background for the side pane
-                            .border_r_1() // Right border
+                            .w(px(200.0))
+                            .bg(rgb(0x1e1e1e))
+                            .border_r_1()
                             .border_color(rgb(0x454545))
                             .p(px(8.0))
                             .text_color(rgb(0xcccccc))
                             .child(self.render_project_explorer(self.current_dir.clone(), cx))
                     )
-                    // Main Editor Area
                     .child(
-                        div() // Takes full size of this relative parent
-                            .flex_1() // Takes remaining horizontal space
+                        div()
+                            .flex_1()
                             .flex()
                             .justify_center()
                             .items_center()
@@ -409,17 +448,85 @@ impl Render for AppView {
                             .child("Hello, Sublime-rust!"),
                     )
             )
-            // Overlay for click-outside-to-close
+            // ── Dropdown overlay — rendered LAST so it paints on top ──────
             .when(self.open_menu != OpenMenu::None, |el: Div| {
-                    el.child(
+                let items = match &self.open_menu {
+                    OpenMenu::File        => file_menu_items(),
+                    OpenMenu::Edit        => edit_menu_items(),
+                    OpenMenu::Selection   => selection_menu_items(),
+                    OpenMenu::Find        => find_menu_items(),
+                    OpenMenu::View        => view_menu_items(),
+                    OpenMenu::Goto        => goto_menu_items(),
+                    OpenMenu::Tools       => tools_menu_items(),
+                    OpenMenu::Project     => project_menu_items(),
+                    OpenMenu::Preferences => preferences_menu_items(),
+                    OpenMenu::Help        => help_menu_items(),
+                    OpenMenu::None        => vec![],
+                };
+                el
+                    // Full-window transparent capture layer — click outside to close
+                    .child(
                         div()
-                            .size_full() // Cover the full window area
                             .absolute()
+                            .top(px(0.0))
+                            .left(px(0.0))
+                            .size_full()
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                                    this.open_menu = OpenMenu::None;
-                                    cx.notify();
-                                })
-                            )
+                                this.open_menu = OpenMenu::None;
+                                cx.notify();
+                            }))
+                    )
+                    // The dropdown panel itself, anchored below the clicked button
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(menu_bar_h))
+                            .left(px(dropdown_left))
+                            .w(px(270.0))
+                            .bg(rgb(0x2d2d2d))
+                            .border_1()
+                            .border_color(rgb(0x454545))
+                            .shadow_lg()
+                            .py(px(4.0))
+                            .children(items.into_iter().map(|item| {
+                                if item.is_separator {
+                                    div()
+                                        .h(px(1.0))
+                                        .my(px(3.0))
+                                        .mx(px(8.0))
+                                        .bg(rgb(0x444444))
+                                        .into_any_element()
+                                } else {
+                                    div()
+                                        .flex()
+                                        .justify_between()
+                                        .items_center()
+                                        .px(px(12.0))
+                                        .py(px(3.0))
+                                        .text_size(px(12.0))
+                                        .text_color(rgb(0xcccccc))
+                                        .hover(|s| s.bg(rgb(0x094771)).text_color(rgb(0xffffff)))
+                                        .cursor_pointer()
+                                        .child(item.label)
+                                        .when(item.has_arrow, |el| {
+                                            el.child(
+                                                div()
+                                                    .text_size(px(10.0))
+                                                    .text_color(rgb(0x888888))
+                                                    .child("▶"),
+                                            )
+                                        })
+                                        .when_some(item.shortcut, |el, sc| {
+                                            el.child(
+                                                div()
+                                                    .text_size(px(11.0))
+                                                    .text_color(rgb(0x888888))
+                                                    .child(sc),
+                                            )
+                                        })
+                                        .into_any_element()
+                                }
+                            }))
                     )
             })
     }
