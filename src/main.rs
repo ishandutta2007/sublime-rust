@@ -223,7 +223,7 @@ impl AppView {
         let project_label = div()
             .flex()
             .items_center()
-            .child(if is_expanded { "▼ " } else { "▶ " })
+            .child(if is_expanded { "▾ " } else { "▸ " })
             .child(project_name)
             .text_color(rgb(0xdddddd))
             .cursor_pointer()
