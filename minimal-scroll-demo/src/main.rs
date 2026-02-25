@@ -1,11 +1,17 @@
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_component::{init, Root, v_flex, h_flex};
 use gpui_component::scroll::{ScrollbarShow, ScrollableElement};
 use gpui_component::theme::{Theme, ThemeMode};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::env;
 
 struct ScrollDemo {
     left_handle: ScrollHandle,
     right_handle: ScrollHandle,
+    current_dir: PathBuf,
+    expanded_dirs: HashSet<PathBuf>,
 }
 
 impl ScrollDemo {
@@ -13,21 +19,109 @@ impl ScrollDemo {
         Self {
             left_handle: ScrollHandle::new(),
             right_handle: ScrollHandle::new(),
+            current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            expanded_dirs: HashSet::new(),
         }
+    }
+
+    /// Recursively renders the project explorer tree.
+    fn render_project_explorer(&self, path: PathBuf, cx: &mut Context<Self>) -> impl IntoElement {
+        let is_expanded = self.expanded_dirs.contains(&path);
+        let dir_name = path
+            .file_name()
+            .map_or("?", |os_str| os_str.to_str().unwrap_or("?"))
+            .to_string();
+
+        let dir_label = div()
+            .flex()
+            .items_center()
+            .child(
+                div()
+                    .w(px(12.0))
+                    .flex()
+                    .justify_center()
+                    .child(if is_expanded { "▾" } else { "▸" }),
+            )
+            .child(div().pl(px(4.0)).child(dir_name))
+            .text_color(rgb(0xdddddd))
+            .hover(|s| s.bg(rgb(0x2d2d2d)))
+            .cursor_pointer()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let path_clone = path.clone();
+                    move |_this, _, _, cx| {
+                        if _this.expanded_dirs.contains(&path_clone) {
+                            _this.expanded_dirs.remove(&path_clone);
+                        } else {
+                            _this.expanded_dirs.insert(path_clone.clone());
+                        }
+                        cx.notify();
+                    }
+                }),
+            );
+
+        let mut children_elements: Vec<AnyElement> = vec![];
+        if is_expanded {
+            if let Ok(entries) = std::fs::read_dir(&path) {
+                let mut sorted_entries: Vec<_> = entries.filter_map(|entry| entry.ok()).collect();
+                sorted_entries.sort_by(|a, b| {
+                    let a_is_dir = a.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                    let b_is_dir = b.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                    match (a_is_dir, b_is_dir) {
+                        (true, false) => std::cmp::Ordering::Less,
+                        (false, true) => std::cmp::Ordering::Greater,
+                        _ => a.file_name().cmp(&b.file_name()),
+                    }
+                });
+
+                for entry in sorted_entries {
+                    let entry_path = entry.path();
+                    let file_name = entry.file_name().to_str().unwrap_or("?").to_string();
+
+                    if entry_path.is_dir() {
+                        children_elements.push(
+                            self.render_project_explorer(entry_path.clone(), cx)
+                                .into_any_element(),
+                        );
+                    } else {
+                        // File entry
+                        children_elements.push(
+                            div()
+                                .pl(px(16.0)) // Align with directory text
+                                .child(file_name)
+                                .text_color(rgb(0xaaaaaa))
+                                .hover(|s| s.bg(rgb(0x2d2d2d)))
+                                .into_any_element(),
+                        );
+                    }
+                }
+            }
+        }
+
+        v_flex()
+            .child(dir_label)
+            .when(!children_elements.is_empty(), |el| {
+                el.child(
+                    v_flex()
+                        .pl(px(12.0)) // Indent nested children
+                        .children(children_elements),
+                )
+            })
     }
 }
 
 impl Render for ScrollDemo {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .size_full()
             .bg(rgb(0x181818))
             .child(
-                // Left Pane
+                // Left Pane (Project Explorer)
                 div()
                     .id("left-pane-wrapper")
                     .relative()
-                    .flex_1()
+                    .w(px(250.0)) // Fixed width for explorer
                     .h_full()
                     .border_r_1()
                     .border_color(rgb(0x333333))
@@ -37,17 +131,11 @@ impl Render for ScrollDemo {
                             .size_full()
                             .track_scroll(&self.left_handle)
                             .overflow_y_scroll()
-                            .children((0..100).map(|i| {
+                            .child(
                                 div()
-                                    .h(px(40.0))
-                                    .px_4()
-                                    .flex()
-                                    .items_center()
-                                    .border_b_1()
-                                    .border_color(rgb(0x222222))
-                                    .text_color(rgb(0xaaaaaa))
-                                    .child(format!("Left Item {}", i))
-                            }))
+                                    .p_2()
+                                    .child(self.render_project_explorer(self.current_dir.clone(), cx))
+                            )
                     )
                     .vertical_scrollbar(&self.left_handle)
             )
@@ -93,7 +181,7 @@ fn main() {
         theme.scrollbar_thumb_hover = rgb(0xffffff).into(); // Keep white on hover/click
         theme.scrollbar = rgb(0x444444).into();             // Dark Gray track
 
-        let bounds = Bounds::centered(None, size(px(800.0), px(600.0)), cx);
+        let bounds = Bounds::centered(None, size(px(1024.0), px(768.0)), cx);
 
         cx.open_window(
             WindowOptions {
