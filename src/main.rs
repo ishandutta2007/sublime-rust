@@ -296,13 +296,22 @@ impl AppView {
                                     cx.listener({
                                         let entry_path_clone = entry_path.clone();
                                         move |_this, _, _, cx| {
-                                            if let Some(pos) = _this.open_tabs.iter().position(|p| p == &entry_path_clone) {
+                                            if let Some(pos) = _this
+                                                .open_tabs
+                                                .iter()
+                                                .position(|p| p == &entry_path_clone)
+                                            {
                                                 _this.active_tab_index = Some(pos);
                                             } else {
-                                                if let Ok(content) = fs::read_to_string(&entry_path_clone) {
-                                                    _this.tab_contents.insert(entry_path_clone.clone(), content);
+                                                if let Ok(content) =
+                                                    fs::read_to_string(&entry_path_clone)
+                                                {
+                                                    _this
+                                                        .tab_contents
+                                                        .insert(entry_path_clone.clone(), content);
                                                     _this.open_tabs.push(entry_path_clone.clone());
-                                                    _this.active_tab_index = Some(_this.open_tabs.len() - 1);
+                                                    _this.active_tab_index =
+                                                        Some(_this.open_tabs.len() - 1);
                                                 }
                                             }
                                             cx.stop_propagation();
@@ -481,51 +490,88 @@ impl Render for AppView {
                                     .bg(rgb(0x1e1e1e))
                                     .h(px(30.0))
                                     .overflow_x_hidden()
-                                    .children(self.open_tabs.iter().enumerate().map(|(idx, path)| {
-                                        let is_active = Some(idx) == self.active_tab_index;
-                                        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("?").to_string();
-                                        let path_clone = path.clone();
-                                        
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .px(px(10.0))
-                                            .h_full()
-                                            .bg(if is_active { rgb(0x232323) } else { rgb(0x181818) })
-                                            .border_r_1()
-                                            .border_color(rgb(0x333333))
-                                            .cursor_pointer()
-                                            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                this.active_tab_index = Some(idx);
-                                                cx.notify();
-                                            }))
-                                            .child(
-                                                div()
-                                                    .text_size(px(12.0))
-                                                    .text_color(if is_active { rgb(0xcccccc) } else { rgb(0x888888) })
-                                                    .child(file_name)
-                                            )
-                                            .child(
-                                                div()
-                                                    .ml(px(8.0))
-                                                    .text_size(px(10.0))
-                                                    .text_color(rgb(0x666666))
-                                                    .hover(|s| s.text_color(rgb(0xcccccc)))
-                                                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                                                        this.open_tabs.remove(idx);
-                                                        this.tab_contents.remove(&path_clone);
-                                                        if let Some(active_idx) = this.active_tab_index {
-                                                            if active_idx >= this.open_tabs.len() {
-                                                                this.active_tab_index = if this.open_tabs.is_empty() { None } else { Some(this.open_tabs.len() - 1) };
-                                                            }
-                                                        }
-                                                        cx.stop_propagation();
+                                    .children(self.open_tabs.iter().enumerate().map(
+                                        |(idx, path)| {
+                                            let is_active = Some(idx) == self.active_tab_index;
+                                            let file_name = path
+                                                .file_name()
+                                                .and_then(|n| n.to_str())
+                                                .unwrap_or("?")
+                                                .to_string();
+                                            let path_clone = path.clone();
+
+                                            div()
+                                                .flex()
+                                                .items_center()
+                                                .px(px(10.0))
+                                                .h_full()
+                                                .bg(if is_active {
+                                                    rgb(0x232323)
+                                                } else {
+                                                    rgb(0x181818)
+                                                })
+                                                .border_r_1()
+                                                .border_color(rgb(0x333333))
+                                                .cursor_pointer()
+                                                .on_mouse_down(
+                                                    MouseButton::Left,
+                                                    cx.listener(move |this, _, _, cx| {
+                                                        this.active_tab_index = Some(idx);
                                                         cx.notify();
-                                                    }))
-                                                    .child("✕")
-                                            )
-                                            .into_any_element()
-                                    })),
+                                                    }),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_size(px(12.0))
+                                                        .text_color(if is_active {
+                                                            rgb(0xcccccc)
+                                                        } else {
+                                                            rgb(0x888888)
+                                                        })
+                                                        .child(file_name),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .ml(px(8.0))
+                                                        .text_size(px(10.0))
+                                                        .text_color(rgb(0x666666))
+                                                        .hover(|s| s.text_color(rgb(0xcccccc)))
+                                                        .on_mouse_down(
+                                                            MouseButton::Left,
+                                                            cx.listener(move |this, _, _, cx| {
+                                                                this.open_tabs.remove(idx);
+                                                                this.tab_contents
+                                                                    .remove(&path_clone);
+                                                                if let Some(active_idx) =
+                                                                    this.active_tab_index
+                                                                {
+                                                                    if active_idx
+                                                                        >= this.open_tabs.len()
+                                                                    {
+                                                                        this.active_tab_index =
+                                                                            if this
+                                                                                .open_tabs
+                                                                                .is_empty()
+                                                                            {
+                                                                                None
+                                                                            } else {
+                                                                                Some(
+                                                                                    this.open_tabs
+                                                                                        .len()
+                                                                                        - 1,
+                                                                                )
+                                                                            };
+                                                                    }
+                                                                }
+                                                                cx.stop_propagation();
+                                                                cx.notify();
+                                                            }),
+                                                        )
+                                                        .child("✕"),
+                                                )
+                                                .into_any_element()
+                                        },
+                                    )),
                             )
                             // ── Editor Pane ──────────────────────────────────────
                             .child(
@@ -539,7 +585,7 @@ impl Render for AppView {
                                         self.active_tab_index
                                             .and_then(|idx| self.open_tabs.get(idx))
                                             .and_then(|path| self.tab_contents.get(path).cloned())
-                                            .unwrap_or_else(|| "Hello, Sublime-rust!".to_string())
+                                            .unwrap_or_else(|| "Hello, Sublime-rust!".to_string()),
                                     ),
                             ),
                     ),
