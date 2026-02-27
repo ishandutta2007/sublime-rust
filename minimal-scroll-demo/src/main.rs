@@ -194,6 +194,8 @@ struct ScrollDemo {
     active_tab_index: Option<usize>,
     tab_contents: HashMap<PathBuf, String>,
     open_menu: OpenMenu,
+    sidebar_width: f32,
+    is_dragging_sidebar: bool,
 }
 
 impl ScrollDemo {
@@ -207,6 +209,8 @@ impl ScrollDemo {
             active_tab_index: None,
             tab_contents: HashMap::new(),
             open_menu: OpenMenu::None,
+            sidebar_width: 250.0,
+            is_dragging_sidebar: false,
         }
     }
 
@@ -272,7 +276,7 @@ impl ScrollDemo {
                         );
                     } else {
                         // File entry
-                        let _entry_path_clone = entry_path.clone();
+                        let entry_path_clone = entry_path.clone();
                         children_elements.push(
                             div()
                                 .pl(px(16.0)) // Align with directory text
@@ -283,14 +287,14 @@ impl ScrollDemo {
                                 .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener({
-                                        let _entry_path_clone = entry_path.clone();
+                                        let entry_path_clone = entry_path.clone();
                                         move |_this, _, _, cx| {
-                                            if let Some(pos) = _this.open_tabs.iter().position(|p| p == &_entry_path_clone) {
+                                            if let Some(pos) = _this.open_tabs.iter().position(|p| p == &entry_path_clone) {
                                                 _this.active_tab_index = Some(pos);
                                             } else {
-                                                if let Ok(content) = fs::read_to_string(&_entry_path_clone) {
-                                                    _this.tab_contents.insert(_entry_path_clone.clone(), content);
-                                                    _this.open_tabs.push(_entry_path_clone.clone());
+                                                if let Ok(content) = fs::read_to_string(&entry_path_clone) {
+                                                    _this.tab_contents.insert(entry_path_clone.clone(), content);
+                                                    _this.open_tabs.push(entry_path_clone.clone());
                                                     _this.active_tab_index = Some(_this.open_tabs.len() - 1);
                                                 }
                                             }
@@ -347,6 +351,27 @@ impl Render for ScrollDemo {
             .relative()
             .size_full()
             .bg(rgb(0x181818))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                if this.is_dragging_sidebar {
+                    this.sidebar_width = event.position.x.into();
+                    if this.sidebar_width < 50.0 {
+                        this.sidebar_width = 50.0;
+                    }
+                    if this.sidebar_width > 600.0 {
+                        this.sidebar_width = 600.0;
+                    }
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _window, cx| {
+                    if this.is_dragging_sidebar {
+                        this.is_dragging_sidebar = false;
+                        cx.notify();
+                    }
+                }),
+            )
             // ── Menu Bar ──────────────────────────────────────────────────
             .child(
                 h_flex()
@@ -402,9 +427,7 @@ impl Render for ScrollDemo {
                             .top_0()
                             .left_0()
                             .bottom_0()
-                            .w(px(250.0))
-                            .border_r_1()
-                            .border_color(rgb(0x333333))
+                            .w(px(self.sidebar_width))
                             .child(
                                 v_flex()
                                     .id("left-scroll-area")
@@ -419,13 +442,32 @@ impl Render for ScrollDemo {
                             )
                             .vertical_scrollbar(&self.left_handle),
                     )
+                    // ── Separator ────────────────────────────────────────────────
+                    .child(
+                        div()
+                            .id("separator")
+                            .absolute()
+                            .top_0()
+                            .left(px(self.sidebar_width))
+                            .w(px(5.0))
+                            .bottom_0()
+                            .bg(rgb(0x333333))
+                            .cursor_col_resize()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _window, cx| {
+                                    this.is_dragging_sidebar = true;
+                                    cx.notify();
+                                }),
+                            ),
+                    )
                     .child(
                         // ── Right Pane (Tabs + Code Editor) ──────────────────────────
                         div()
                             .id("right-pane-wrapper")
                             .absolute()
                             .top_0()
-                            .left(px(251.0))
+                            .left(px(self.sidebar_width + 2.0))
                             .right_0()
                             .bottom_0()
                             // ── Tab Bar ──────────────────────────────────────────
@@ -531,9 +573,7 @@ impl Render for ScrollDemo {
                     OpenMenu::None => vec![],
                 };
 
-                // Approximate horizontal offset for each dropdown
                 let mut dropdown_left = 0.0f32;
-                // Hardcoded widths for now, can be improved with char_widths if needed
                 let btn_width = |label: &str| label.len() as f32 * 8.0 + 24.0;
                 
                 for (label, variant) in menu_bar_labels.iter() {
@@ -544,7 +584,6 @@ impl Render for ScrollDemo {
                 }
 
                 el
-                    // Capture layer to close menu
                     .child(
                         div()
                             .absolute()
@@ -559,7 +598,6 @@ impl Render for ScrollDemo {
                                 }),
                             ),
                     )
-                    // The dropdown panel
                     .child(
                         v_flex()
                             .absolute()
@@ -622,9 +660,9 @@ fn main() {
         Theme::change(ThemeMode::Dark, None, cx);
         let theme = cx.global_mut::<Theme>();
         theme.scrollbar_show = ScrollbarShow::Always;
-        theme.scrollbar_thumb = rgb(0xffffff).into(); // Solid White thumb
-        theme.scrollbar_thumb_hover = rgb(0xffffff).into(); // Keep white on hover/click
-        theme.scrollbar = rgb(0x2a2a2a).into(); // Dark Gray track
+        theme.scrollbar_thumb = rgb(0xffffff).into(); 
+        theme.scrollbar_thumb_hover = rgb(0xffffff).into(); 
+        theme.scrollbar = rgb(0x2a2a2a).into(); 
 
         let bounds = Bounds::centered(None, size(px(1024.0), px(768.0)), cx);
 
