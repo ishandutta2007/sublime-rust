@@ -92,7 +92,7 @@ fn file_menu_items() -> Vec<MenuItem> {
         MenuItem::sep(),
         MenuItem::item("Save", Some("Ctrl+S"), Save),
         MenuItem::item("Save As...", Some("Ctrl+Shift+S"), SaveAs),
-        MenuItem::item("Save All", None, SaveAll),
+        MenuItem::item("Save All", Some("Ctrl+Alt+S"), SaveAll),
         MenuItem::sep(),
         MenuItem::item("Reload from Disk", None, Save),
         MenuItem::sep(),
@@ -597,7 +597,16 @@ impl Render for ScrollDemo {
                       else {
                           let action = item.action.boxed_clone();
                           h_flex().justify_between().items_center().px(px(12.0)).py(px(3.0)).text_size(px(12.0)).text_color(rgb(0xcccccc)).hover(|s| s.bg(rgb(0x094771)).text_color(rgb(0xffffff))).cursor_pointer()
-                                  .on_mouse_down(MouseButton::Left, cx.listener(move |_, _, _, cx| { cx.dispatch_action(action.as_ref()); }))
+                                  .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { 
+                                      let action = action.as_ref();
+                                      if action.as_any().is::<Save>() { this.save_active(cx); }
+                                      else if action.as_any().is::<SaveAll>() { this.save_all(cx); }
+                                      else if action.as_any().is::<SaveAs>() { this.save_as(cx); }
+                                      else if action.as_any().is::<Quit>() { cx.quit(); }
+                                      else { cx.dispatch_action(action); }
+                                      this.open_menu = OpenMenu::None;
+                                      cx.notify();
+                                  }))
                                   .child(item.label)
                                   .when(item.has_arrow, |el| el.child(div().text_size(px(10.0)).text_color(rgb(0x888888)).child("▶")))
                                   .when_some(item.shortcut, |el, sc| el.child(div().text_size(px(10.0)).text_color(rgb(0x888888)).child(sc)))
@@ -617,6 +626,8 @@ fn main() {
             KeyBinding::new("ctrl-s", Save, None),
             KeyBinding::new("cmd-shift-s", SaveAs, None),
             KeyBinding::new("ctrl-shift-s", SaveAs, None),
+            KeyBinding::new("cmd-alt-s", SaveAll, None),
+            KeyBinding::new("ctrl-alt-s", SaveAll, None),
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("ctrl-q", Quit, None),
         ]);
