@@ -23,8 +23,7 @@ impl ScrollDemo {
             right_handle: ScrollHandle::new(),
             current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             expanded_dirs: HashSet::new(),
-            active_file_content: "Click a file in the explorer to see its content here."
-                .to_string(),
+            active_file_content: "Click a file in the explorer to see its content here.".to_string(),
         }
     }
 
@@ -90,6 +89,7 @@ impl ScrollDemo {
                         );
                     } else {
                         // File entry
+                        let entry_path_clone = entry_path.clone();
                         children_elements.push(
                             div()
                                 .pl(px(16.0)) // Align with directory text
@@ -99,15 +99,11 @@ impl ScrollDemo {
                                 .cursor_pointer()
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener({
-                                        let entry_path_clone = entry_path.clone();
-                                        move |_this, _, _, cx| {
-                                            if let Ok(content) =
-                                                fs::read_to_string(&entry_path_clone)
-                                            {
-                                                _this.active_file_content = content;
-                                                cx.notify();
-                                            }
+                                    cx.listener(move |this, _, _, cx| {
+                                        if let Ok(content) = fs::read_to_string(&entry_path_clone) {
+                                            this.active_file_content = content;
+                                            this.right_handle.set_offset(Point::default());
+                                            cx.notify();
                                         }
                                     }),
                                 )
@@ -132,26 +128,25 @@ impl ScrollDemo {
 
 impl Render for ScrollDemo {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut cloned_content = self.active_file_content.clone();
-        let mut parts: Vec<&str> = cloned_content.split('\n').collect();
-
-        if !parts.is_empty() {
-            let original = parts.clone();
-            while parts.len() < 60 {
-                parts.extend_from_slice(&original);
-            }
-        }
-
-        h_flex()
+        // Use absolute positioning for both panes so each has fully resolved pixel
+        // bounds at paint time. flex_1() defers size resolution to after layout,
+        // which means the scrollbar thumb has no height to paint into.
+        // With absolute positioning GPUI resolves left/right/top/bottom into pixel
+        // bounds before the paint pass runs, so the scrollbar renders correctly.
+        div()
+            .id("root")
+            .relative()
             .size_full()
             .bg(rgb(0x181818))
             .child(
-                // Left Pane (Project Explorer)
+                // ── Left Pane (Project Explorer) ─────────────────────────────
                 div()
                     .id("left-pane-wrapper")
-                    .relative()
-                    .w(px(250.0)) // Fixed width for explorer
-                    .h_full()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .bottom_0()
+                    .w(px(250.0))
                     .border_r_1()
                     .border_color(rgb(0x333333))
                     .child(
@@ -161,45 +156,46 @@ impl Render for ScrollDemo {
                             .track_scroll(&self.left_handle)
                             .overflow_y_scroll()
                             .child(
-                                div().p_2().child(
-                                    self.render_project_explorer(self.current_dir.clone(), cx),
-                                ),
-                            ),
+                                v_flex()
+                                    .flex_none()
+                                    .p_2()
+                                    .child(self.render_project_explorer(self.current_dir.clone(), cx))
+                            )
                     )
                     .vertical_scrollbar(&self.left_handle),
             )
             .child(
-                // Right Pane (Code Editor)
+                // ── Right Pane (Code Editor) ─────────────────────────────────
+                // Also absolutely positioned: left edge is at 250px (after divider),
+                // right/top/bottom stretch to fill. These are pixel-resolved before
+                // the paint pass, so vertical_scrollbar() gets real bounds.
                 div()
                     .id("right-pane-wrapper")
-                    .relative()
-                    .flex_1()
-                    .h_full()
+                    .absolute()
+                    .top_0()
+                    .left(px(251.0)) // 250px left pane + 1px border
+                    .right_0()
+                    .bottom_0()
                     .child(
                         v_flex()
                             .id("right-scroll-area")
                             .size_full()
                             .track_scroll(&self.right_handle)
                             .overflow_y_scroll()
-                            .children((0..60).map(|i| {
-                                div()
-                                    .h(px(40.0))
-                                    .px_4()
-                                    .flex()
-                                    .items_center()
-                                    .border_b_1()
-                                    .border_color(rgb(0x222222))
-                                    .text_color(rgb(0xcccccc))
-                                    // .font_family("Courier New")
-                                    .child(format!("Yo{}: {}", i, parts[i]))
-                            })), //                            // .child(
-                                 //                                // div()
-                                 //                                    .p(px(16.0))
-                                 //                                    .text_color(rgb(0xcccccc))
-                                 //                                    .font_family("Courier New")
-                                 //                                    .child(self.active_file_content.clone())
-                                 //                                    .vertical_scrollbar(&self.right_handle)
-                                 //                            // )
+                            .child(
+                                v_flex()
+                                    .flex_none()
+                                    .p(px(16.0))
+                                    .children(self.active_file_content.lines().enumerate().map(|(i, line)| {
+                                        div()
+                                            .id(i)
+                                            .flex_none()
+                                            .h(px(20.0))
+                                            .text_color(rgb(0xcccccc))
+                                            .font_family("Courier New")
+                                            .child(line.to_string())
+                                    }))
+                            )
                     )
                     .vertical_scrollbar(&self.right_handle),
             )
@@ -210,13 +206,13 @@ fn main() {
     Application::new().run(|cx: &mut App| {
         init(cx);
 
-        // Force high-contrast theme for scrollbars and fix click color change
+        // Force persistent white scrollbars
         Theme::change(ThemeMode::Dark, None, cx);
         let theme = cx.global_mut::<Theme>();
         theme.scrollbar_show = ScrollbarShow::Always;
         theme.scrollbar_thumb = rgb(0xffffff).into(); // Solid White thumb
         theme.scrollbar_thumb_hover = rgb(0xffffff).into(); // Keep white on hover/click
-        theme.scrollbar = rgb(0x444444).into(); // Dark Gray track
+        theme.scrollbar = rgb(0x2a2a2a).into(); // Dark Gray track
 
         let bounds = Bounds::centered(None, size(px(1024.0), px(768.0)), cx);
 

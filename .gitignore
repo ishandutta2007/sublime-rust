@@ -3,3 +3,4 @@ target
 *.log
 *.txt
 .ruff_cache
+.DS_Store
