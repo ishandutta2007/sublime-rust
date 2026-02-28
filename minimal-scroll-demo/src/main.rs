@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
-use syntect::util::LinesWithEndings;
 
 actions!(sublime_rust, [Quit, Save, SaveAs, SaveAll]);
 
@@ -529,11 +528,13 @@ impl Render for ScrollDemo {
                                                         if this.cursor_col > 0 {
                                                             lines[this.cursor_row].remove(this.cursor_col - 1);
                                                             this.cursor_col -= 1;
+                                                            this.dirty_tabs.insert(path);
                                                         } else if this.cursor_row > 0 {
                                                             let current_line = lines.remove(this.cursor_row);
                                                             this.cursor_row -= 1;
                                                             this.cursor_col = lines[this.cursor_row].len();
                                                             lines[this.cursor_row].push_str(&current_line);
+                                                            this.dirty_tabs.insert(path);
                                                         }
                                                     }
                                                     "enter" => {
@@ -542,6 +543,7 @@ impl Render for ScrollDemo {
                                                         lines.insert(this.cursor_row + 1, new_line);
                                                         this.cursor_row += 1;
                                                         this.cursor_col = 0;
+                                                        this.dirty_tabs.insert(path);
                                                     }
                                                     "left" => {
                                                         if this.cursor_col > 0 { this.cursor_col -= 1; }
@@ -569,15 +571,15 @@ impl Render for ScrollDemo {
                                                             this.cursor_col = this.cursor_col.min(lines[this.cursor_row].len());
                                                         }
                                                     }
-                                                    "space" => { lines[this.cursor_row].insert(this.cursor_col, ' '); this.cursor_col += 1; }
-                                                    "tab" => { lines[this.cursor_row].insert_str(this.cursor_col, "    "); this.cursor_col += 4; }
+                                                    "space" => { lines[this.cursor_row].insert(this.cursor_col, ' '); this.cursor_col += 1; this.dirty_tabs.insert(path); }
+                                                    "tab" => { lines[this.cursor_row].insert_str(this.cursor_col, "    "); this.cursor_col += 4; this.dirty_tabs.insert(path); }
                                                     key if key.len() == 1 => {
                                                         lines[this.cursor_row].insert_str(this.cursor_col, key);
                                                         this.cursor_col += 1;
+                                                        this.dirty_tabs.insert(path);
                                                     }
                                                     _ => {}
                                                 }
-                                                this.dirty_tabs.insert(path);
                                                 cx.notify();
                                             }
                                         }
@@ -592,8 +594,6 @@ impl Render for ScrollDemo {
                                                 v_flex().flex_none().p(px(16.0)).children(
                                                     active_lines.into_iter().enumerate().map(|(i, line)| {
                                                         let is_cursor_row = is_focused && Some(i) == Some(self.cursor_row);
-                                                        
-                                                        // Apply Syntax Highlighting
                                                         let ranges: Vec<(Style, &str)> = highlighter.highlight_line(&line, &self.syntax_set).unwrap_or_default();
                                                         let mut span_elements: Vec<AnyElement> = vec![];
                                                         let mut current_offset = 0;
@@ -601,29 +601,18 @@ impl Render for ScrollDemo {
                                                         for (style, text) in ranges {
                                                             let color = style.foreground;
                                                             let text_len = text.len();
-                                                            
-                                                            // Handle cursor insertion within this highlighted span
                                                             if is_cursor_row && self.cursor_col >= current_offset && self.cursor_col < current_offset + text_len {
                                                                 let split_idx = self.cursor_col - current_offset;
                                                                 let (before, after) = text.split_at(split_idx);
-                                                                
-                                                                if !before.is_empty() {
-                                                                    span_elements.push(div().text_color(rgb(u32::from_be_bytes([0, color.r, color.g, color.b]))).child(before.to_string()).into_any_element());
-                                                                }
+                                                                if !before.is_empty() { span_elements.push(div().text_color(rgb(u32::from_be_bytes([0, color.r, color.g, color.b]))).child(before.to_string()).into_any_element()); }
                                                                 span_elements.push(div().text_color(rgb(0xffffff)).child("|").into_any_element());
-                                                                if !after.is_empty() {
-                                                                    span_elements.push(div().text_color(rgb(u32::from_be_bytes([0, color.r, color.g, color.b]))).child(after.to_string()).into_any_element());
-                                                                }
+                                                                if !after.is_empty() { span_elements.push(div().text_color(rgb(u32::from_be_bytes([0, color.r, color.g, color.b]))).child(after.to_string()).into_any_element()); }
                                                             } else {
                                                                 span_elements.push(div().text_color(rgb(u32::from_be_bytes([0, color.r, color.g, color.b]))).child(text.to_string()).into_any_element());
                                                             }
                                                             current_offset += text_len;
                                                         }
-
-                                                        // If cursor is at the very end of the line
-                                                        if is_cursor_row && self.cursor_col >= current_offset {
-                                                            span_elements.push(div().text_color(rgb(0xffffff)).child("|").into_any_element());
-                                                        }
+                                                        if is_cursor_row && self.cursor_col >= current_offset { span_elements.push(div().text_color(rgb(0xffffff)).child("|").into_any_element()); }
 
                                                         h_flex()
                                                             .id(i)
@@ -638,6 +627,16 @@ impl Render for ScrollDemo {
                                                                 }
                                                                 cx.notify();
                                                             }))
+                                                            .child(
+                                                                div()
+                                                                    .w(px(40.0))
+                                                                    .text_color(rgb(0x666666))
+                                                                    .text_size(px(12.0))
+                                                                    .flex()
+                                                                    .justify_end()
+                                                                    .pr(px(8.0))
+                                                                    .child(format!("{}", i + 1))
+                                                            )
                                                             .children(span_elements)
                                                     }),
                                                 ),
@@ -647,7 +646,6 @@ impl Render for ScrollDemo {
                             )
                     )
             )
-            // ── Footer ──────────────────────────────────────────────────
             .child(
                 h_flex()
                     .absolute()
@@ -668,7 +666,6 @@ impl Render for ScrollDemo {
                         div().text_size(px(11.0)).text_color(rgb(0xffffff)).child(self.current_syntax_name.clone())
                     )
             )
-            // ── Dropdown Overlays ─────────────────────────────────────────
             .when(self.open_menu != OpenMenu::None, |el| {
                 let items = match &self.open_menu { OpenMenu::File => file_menu_items(), _ => vec![] };
                 let mut dropdown_left = 0.0f32;
@@ -682,14 +679,15 @@ impl Render for ScrollDemo {
                       if item.is_separator { div().h(px(1.0)).my(px(3.0)).mx(px(8.0)).bg(rgb(0x444444)).into_any_element() }
                       else {
                           let action = item.action.boxed_clone();
-                          h_flex().justify_between().items_center().px(px(12.0)).py(px(3.0)).text_size(px(12.0)).text_color(rgb(0xcccccc)).hover(|s| s.bg(rgb(0x094771)).text_color(rgb(0xffffff))).cursor_pointer()
+                          let label = item.label;
+                          h_flex().id(label).justify_between().items_center().px(px(12.0)).py(px(3.0)).text_size(px(12.0)).text_color(rgb(0xcccccc)).hover(|s| s.bg(rgb(0x094771)).text_color(rgb(0xffffff))).cursor_pointer()
                                   .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { 
-                                      let action = action.as_ref();
-                                      if action.as_any().is::<Save>() { this.save_active(cx); }
-                                      else if action.as_any().is::<SaveAll>() { this.save_all(cx); }
-                                      else if action.as_any().is::<SaveAs>() { this.save_as(cx); }
-                                      else if action.as_any().is::<Quit>() { cx.quit(); }
-                                      else { cx.dispatch_action(action); }
+                                      let action_ref = action.as_ref();
+                                      if label == "Save" { this.save_active(cx); }
+                                      else if label == "Save All" { this.save_all(cx); }
+                                      else if label == "Save As..." { this.save_as(cx); }
+                                      else if label == "Quit" || label == "Exit" { cx.quit(); }
+                                      else { cx.dispatch_action(action_ref); }
                                       this.open_menu = OpenMenu::None;
                                       cx.notify();
                                   }))
