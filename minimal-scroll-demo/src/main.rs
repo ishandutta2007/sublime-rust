@@ -131,10 +131,22 @@ struct ScrollDemo {
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
     current_syntax_name: String,
+
+    // Char widths
+    char_widths: HashMap<char, f32>,
 }
 
 impl ScrollDemo {
     fn new(cx: &mut Context<Self>) -> Self {
+        // Load char widths from parent directory or current directory
+        let char_widths = if let Ok(content) = fs::read_to_string("../charlen_arial_12px.json") {
+            serde_json::from_str(&content).unwrap_or_default()
+        } else if let Ok(content) = fs::read_to_string("charlen_arial_12px.json") {
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
         Self {
             left_handle: ScrollHandle::new(),
             right_handle: ScrollHandle::new(),
@@ -153,6 +165,7 @@ impl ScrollDemo {
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
             current_syntax_name: "Plain Text".to_string(),
+            char_widths,
         }
     }
 
@@ -668,12 +681,20 @@ impl Render for ScrollDemo {
             )
             .when(self.open_menu != OpenMenu::None, |el| {
                 let items = match &self.open_menu { OpenMenu::File => file_menu_items(), _ => vec![] };
+                
+                // Helper to calculate label width precisely
+                let get_label_width = |label: &str, char_widths: &HashMap<char, f32>| {
+                    label.chars()
+                        .map(|c| char_widths.get(&c).unwrap_or(&7.0))
+                        .sum::<f32>() + 24.0
+                };
+
                 let mut dropdown_left = 0.0f32;
-                let btn_width = |label: &str| label.len() as f32 * 8.0 + 24.0;
                 for (label, variant) in menu_bar_labels.iter() {
                     if variant == &self.open_menu { break; }
-                    dropdown_left += btn_width(label);
+                    dropdown_left += get_label_width(label, &self.char_widths);
                 }
+
                 el.child(div().absolute().top_0().left_0().size_full().on_mouse_down(MouseButton::Left, cx.listener(|_this, _, _, cx| { _this.open_menu = OpenMenu::None; cx.notify(); })))
                   .child(v_flex().absolute().top(px(menu_bar_h)).left(px(dropdown_left)).w(px(270.0)).bg(rgb(0x2d2d2d)).border_1().border_color(rgb(0x454545)).shadow_lg().py(px(4.0)).children(items.into_iter().map(|item| {
                       if item.is_separator { div().h(px(1.0)).my(px(3.0)).mx(px(8.0)).bg(rgb(0x444444)).into_any_element() }
