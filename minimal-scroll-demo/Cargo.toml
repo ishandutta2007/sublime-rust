@@ -6,5 +6,7 @@ edition = "2021"
 [dependencies]
 gpui = "=0.2.2"
 gpui-component = "0.5.1"
+ignore = "0.4.25"
 serde_json = "1.0.149"
 syntect = "5.3.0"
+walkdir = "2.5.0"

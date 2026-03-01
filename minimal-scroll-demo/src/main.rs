@@ -12,7 +12,10 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
-actions!(sublime_rust, [Quit, Save, SaveAs, SaveAll, FindAction]);
+use ignore::WalkBuilder;
+use walkdir::WalkDir;
+
+actions!(sublime_rust, [Quit, Save, SaveAs, SaveAll, FindAction, FindInFilesAction]);
 
 // ── Menu state ────────────────────────────────────────────────────────────────
 
@@ -144,7 +147,7 @@ fn find_menu_items() -> Vec<MenuItem> {
         MenuItem::item("Find Previous", Some("Shift+F3"), Save),
         MenuItem::item("Replace...", Some("Ctrl+H"), Save),
         MenuItem::sep(),
-        MenuItem::item("Find in Files...", Some("Ctrl+Shift+F"), Save),
+        MenuItem::item("Find in Files...", Some("Ctrl+Shift+F"), FindInFilesAction),
     ]
 }
 
@@ -209,6 +212,9 @@ struct ScrollDemo {
     right_handle: ScrollHandle,
     focus_handle: FocusHandle,
     find_focus_handle: FocusHandle,
+    fif_focus_find: FocusHandle,
+    fif_focus_where: FocusHandle,
+    fif_focus_replace: FocusHandle,
     current_dir: PathBuf,
     expanded_dirs: HashSet<PathBuf>,
     open_tabs: Vec<PathBuf>,
@@ -237,10 +243,18 @@ struct ScrollDemo {
     find_query: String,
     find_matches: Vec<(usize, usize)>, // (row, col)
     active_match_index: Option<usize>,
+
+    // Find in Files state
+    fif_active: bool,
+    fif_query: String,
+    fif_where: String,
+    fif_replace: String,
+    fif_use_gitignore: bool,
 }
 
 impl ScrollDemo {
     fn new(cx: &mut Context<Self>) -> Self {
+        let current_dir = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let char_widths = if let Ok(content) = fs::read_to_string("../charlen_arial_12px.json") {
             serde_json::from_str(&content).unwrap_or_default()
         } else if let Ok(content) = fs::read_to_string("charlen_arial_12px.json") {
@@ -254,7 +268,11 @@ impl ScrollDemo {
             right_handle: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             find_focus_handle: cx.focus_handle(),
-            current_dir: env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            fif_focus_find: cx.focus_handle(),
+            fif_focus_where: cx.focus_handle(),
+            fif_focus_replace: cx.focus_handle(),
+            fif_where: current_dir.to_string_lossy().to_string(),
+            current_dir,
             expanded_dirs: HashSet::new(),
             open_tabs: Vec::new(),
             active_tab_index: None,
@@ -274,6 +292,10 @@ impl ScrollDemo {
             find_query: String::new(),
             find_matches: Vec::new(),
             active_match_index: None,
+            fif_active: false,
+            fif_query: String::new(),
+            fif_replace: String::new(),
+            fif_use_gitignore: true,
         }
     }
 
@@ -373,9 +395,6 @@ impl ScrollDemo {
             self.cursor_row = row;
             self.cursor_col = col;
 
-            // Autoscroll: Calculate target Y offset. 
-            // Each line is 20px, top padding is 16px.
-            // We scroll so the match is roughly in the upper third of the view.
             let line_height = 20.0;
             let top_padding = 16.0;
             let target_y = (row as f32 * line_height) + top_padding - 100.0;
@@ -399,6 +418,88 @@ impl ScrollDemo {
             self.jump_to_active_match();
             cx.notify();
         }
+    }
+
+    fn perform_find_in_files(&mut self, cx: &mut Context<Self>) {
+        if self.fif_query.is_empty() { return; }
+        let search_path = PathBuf::from(&self.fif_where);
+        if !search_path.exists() { return; }
+
+        let mut results = Vec::new();
+        let mut file_count = 0;
+        let mut match_count = 0;
+
+        let walk = if self.fif_use_gitignore {
+            WalkBuilder::new(&search_path).build()
+        } else {
+            ignore::Walk::new(&search_path)
+        };
+
+        for entry in walk {
+            if let Ok(entry) = entry {
+                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        file_count += 1;
+                        let lines: Vec<_> = content.lines().collect();
+                        let mut file_matches = Vec::new();
+                        for (i, line) in lines.iter().enumerate() {
+                            if line.contains(&self.fif_query) {
+                                file_matches.push(format!("  {:>4}: {}", i + 1, line));
+                                match_count += 1;
+                            }
+                        }
+                        if !file_matches.is_empty() {
+                            results.push(format!("{}:", entry.path().display()));
+                            results.extend(file_matches);
+                            results.push(String::new());
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut final_content = vec![
+            format!("Searching {} files for term \"{}\"", file_count, self.fif_query),
+            String::new(),
+        ];
+        final_content.extend(results.into_iter());
+        final_content.push(format!("{} matches found in {} files", match_count, file_count));
+
+        let results_path = PathBuf::from("Find Results");
+        self.tab_contents.insert(results_path.clone(), final_content);
+        if !self.open_tabs.contains(&results_path) {
+            self.open_tabs.push(results_path.clone());
+        }
+        self.active_tab_index = self.open_tabs.iter().position(|p| p == &results_path);
+        self.fif_active = false;
+        cx.notify();
+    }
+
+    fn perform_replace_in_files(&mut self, cx: &mut Context<Self>) {
+        if self.fif_query.is_empty() { return; }
+        let search_path = PathBuf::from(&self.fif_where);
+        if !search_path.exists() { return; }
+
+        let walk = if self.fif_use_gitignore {
+            WalkBuilder::new(&search_path).build()
+        } else {
+            ignore::Walk::new(&search_path)
+        };
+
+        for entry in walk {
+            if let Ok(entry) = entry {
+                if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false) {
+                    if let Ok(content) = fs::read_to_string(entry.path()) {
+                        if content.contains(&self.fif_query) {
+                            let new_content = content.replace(&self.fif_query, &self.fif_replace);
+                            let _ = fs::write(entry.path(), new_content);
+                        }
+                    }
+                }
+            }
+        }
+        self.fif_active = false;
+        cx.notify();
     }
 
     fn close_tab(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -540,6 +641,9 @@ impl Render for ScrollDemo {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_focused = _window.focused(cx) == Some(self.focus_handle.clone());
         let is_find_focused = _window.focused(cx) == Some(self.find_focus_handle.clone());
+        let is_fif_find_focused = _window.focused(cx) == Some(self.fif_focus_find.clone());
+        let is_fif_where_focused = _window.focused(cx) == Some(self.fif_focus_where.clone());
+        let is_fif_replace_focused = _window.focused(cx) == Some(self.fif_focus_replace.clone());
 
         let active_lines = self.active_tab_index
             .and_then(|idx| self.open_tabs.get(idx))
@@ -571,6 +675,7 @@ impl Render for ScrollDemo {
         let menu_bar_h = 26.0f32;
         let footer_h = 22.0f32;
         let find_bar_h = if self.find_active { 36.0f32 } else { 0.0f32 };
+        let fif_bar_h = if self.fif_active { 108.0f32 } else { 0.0f32 };
 
         div()
             .id("root")
@@ -582,7 +687,15 @@ impl Render for ScrollDemo {
             .on_action(cx.listener(|this, _action: &SaveAll, _window, cx| this.save_all(cx)))
             .on_action(cx.listener(|this, _action: &FindAction, window, cx| {
                 this.find_active = !this.find_active;
+                this.fif_active = false;
                 if this.find_active { window.focus(&this.find_focus_handle); }
+                else { window.focus(&this.focus_handle); }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, _action: &FindInFilesAction, window, cx| {
+                this.fif_active = !this.fif_active;
+                this.find_active = false;
+                if this.fif_active { window.focus(&this.fif_focus_find); }
                 else { window.focus(&this.focus_handle); }
                 cx.notify();
             }))
@@ -633,7 +746,7 @@ impl Render for ScrollDemo {
                 div()
                     .absolute()
                     .top(px(menu_bar_h))
-                    .bottom(px(footer_h + find_bar_h))
+                    .bottom(px(footer_h + find_bar_h + fif_bar_h))
                     .left_0()
                     .right_0()
                     .child(
@@ -951,6 +1064,88 @@ impl Render for ScrollDemo {
                         .child(div().text_size(px(11.0)).text_color(rgb(0x888888)).child(format!("{} of {}", self.active_match_index.map(|i| i + 1).unwrap_or(0), self.find_matches.len())))
                 )
             })
+            .when(self.fif_active, |el| {
+                el.child(
+                    v_flex()
+                        .absolute().bottom(px(footer_h)).left_0().right_0().h(px(fif_bar_h))
+                        .bg(rgb(0x2d2d2d)).border_t_1().border_color(rgb(0x454545)).px_4().py_2().gap_1()
+                        .child(
+                            h_flex().gap_4().items_center()
+                                .child(div().w(px(60.0)).text_size(px(12.0)).text_color(rgb(0xcccccc)).child("Find:"))
+                                .child(
+                                    div()
+                                        .flex_1().bg(rgb(0x3c3c3c)).border_1().border_color(if is_fif_find_focused { rgb(0x007acc) } else { rgb(0x454545) }).px_2().py_1()
+                                        .track_focus(&self.fif_focus_find)
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, _| { window.focus(&this.fif_focus_find); }))
+                                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                            match event.keystroke.key.as_str() {
+                                                "backspace" => { this.fif_query.pop(); }
+                                                "enter" => { this.perform_find_in_files(cx); }
+                                                "escape" => { this.fif_active = false; window.focus(&this.focus_handle); }
+                                                key if key.len() == 1 => { this.fif_query.push_str(key); }
+                                                _ => {}
+                                            }
+                                            cx.notify();
+                                        }))
+                                        .child(div().text_size(px(12.0)).text_color(rgb(0xffffff)).child(if self.fif_query.is_empty() { " ".to_string() } else { self.fif_query.clone() }))
+                                )
+                                .child(
+                                    div().px_3().py_1().bg(rgb(0x007acc)).hover(|s| s.bg(rgb(0x0062a3))).cursor_pointer()
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.perform_find_in_files(cx)))
+                                        .child(div().text_size(px(11.0)).text_color(rgb(0xffffff)).child("Find"))
+                                )
+                        )
+                        .child(
+                            h_flex().gap_4().items_center()
+                                .child(div().w(px(60.0)).text_size(px(12.0)).text_color(rgb(0xcccccc)).child("Where:"))
+                                .child(
+                                    div()
+                                        .flex_1().bg(rgb(0x3c3c3c)).border_1().border_color(if is_fif_where_focused { rgb(0x007acc) } else { rgb(0x454545) }).px_2().py_1()
+                                        .track_focus(&self.fif_focus_where)
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, _| { window.focus(&this.fif_focus_where); }))
+                                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                            match event.keystroke.key.as_str() {
+                                                "backspace" => { this.fif_where.pop(); }
+                                                key if key.len() == 1 => { this.fif_where.push_str(key); }
+                                                _ => {}
+                                            }
+                                            cx.notify();
+                                        }))
+                                        .child(div().text_size(px(12.0)).text_color(rgb(0xaaaaaa)).child(if self.fif_where.is_empty() { " ".to_string() } else { self.fif_where.clone() }))
+                                )
+                                .child(
+                                    h_flex().items_center().gap_2().cursor_pointer()
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| { this.fif_use_gitignore = !this.fif_use_gitignore; cx.notify(); }))
+                                        .child(div().size(px(14.0)).border_1().border_color(rgb(0x666666)).bg(if self.fif_use_gitignore { rgb(0x007acc) } else { rgb(0x3c3c3c) }))
+                                        .child(div().text_size(px(11.0)).text_color(rgb(0xcccccc)).child(".gitignore"))
+                                )
+                        )
+                        .child(
+                            h_flex().gap_4().items_center()
+                                .child(div().w(px(60.0)).text_size(px(12.0)).text_color(rgb(0xcccccc)).child("Replace:"))
+                                .child(
+                                    div()
+                                        .flex_1().bg(rgb(0x3c3c3c)).border_1().border_color(if is_fif_replace_focused { rgb(0x007acc) } else { rgb(0x454545) }).px_2().py_1()
+                                        .track_focus(&self.fif_focus_replace)
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, _| { window.focus(&this.fif_focus_replace); }))
+                                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                                            match event.keystroke.key.as_str() {
+                                                "backspace" => { this.fif_replace.pop(); }
+                                                key if key.len() == 1 => { this.fif_replace.push_str(key); }
+                                                _ => {}
+                                            }
+                                            cx.notify();
+                                        }))
+                                        .child(div().text_size(px(12.0)).text_color(rgb(0xffffff)).child(if self.fif_replace.is_empty() { " ".to_string() } else { self.fif_replace.clone() }))
+                                )
+                                .child(
+                                    div().px_3().py_1().bg(rgb(0x3e3e3e)).hover(|s| s.bg(rgb(0x4e4e4e))).cursor_pointer()
+                                        .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.perform_replace_in_files(cx)))
+                                        .child(div().text_size(px(11.0)).text_color(rgb(0xcccccc)).child("Replace"))
+                                )
+                        )
+                )
+            })
             .when(self.open_menu != OpenMenu::None, |el| {
                 let items = match &self.open_menu { 
                     OpenMenu::File => file_menu_items(), 
@@ -992,7 +1187,13 @@ impl Render for ScrollDemo {
                                       else if label == "Save As..." { this.save_as(cx); }
                                       else if label == "Find..." { 
                                           this.find_active = true; 
+                                          this.fif_active = false;
                                           window.focus(&this.find_focus_handle);
+                                      }
+                                      else if label == "Find in Files..." {
+                                          this.fif_active = true;
+                                          this.find_active = false;
+                                          window.focus(&this.fif_focus_find);
                                       }
                                       else if label == "Quit" || label == "Exit" { cx.quit(); }
                                       else { cx.dispatch_action(action_ref); }
@@ -1076,6 +1277,8 @@ fn main() {
             KeyBinding::new("ctrl-alt-s", SaveAll, None),
             KeyBinding::new("cmd-f", FindAction, None),
             KeyBinding::new("ctrl-f", FindAction, None),
+            KeyBinding::new("cmd-shift-f", FindInFilesAction, None),
+            KeyBinding::new("ctrl-shift-f", FindInFilesAction, None),
             KeyBinding::new("cmd-q", Quit, None),
             KeyBinding::new("ctrl-q", Quit, None),
         ]);
